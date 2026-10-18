@@ -34,7 +34,12 @@ cd EEG_visualizer_for_muse/local_mind_monitor
 
 No headband yet? Use the **Test Mode** launcher to run on a synthetic signal and
 confirm everything installs. The first launch builds a private `.venv` and
-installs dependencies (~1 minute); every launch after that opens instantly.
+installs dependencies (~1 minute) and, on Windows, adds a Desktop shortcut;
+every launch after that opens instantly.
+
+Recordings are saved to **`Documents/EEG Visualizer/Sessions`** — outside the app
+folder, so reinstalling never touches them, and backed up along with Documents if
+your computer syncs it (e.g. OneDrive).
 
 ## Requirements
 

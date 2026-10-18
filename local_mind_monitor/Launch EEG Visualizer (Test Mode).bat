@@ -72,6 +72,15 @@ if not exist "%READY_MARKER%" (
         exit /b 1
     )
 
+    rem Put an EEG Visualizer icon on the Desktop - best-effort, once, at setup,
+    rem silently skipped if anything goes wrong. Paths are handed over through
+    rem environment variables so spaces or apostrophes in folder names are safe.
+    set "EEGV_TARGET=%SCRIPT_DIR%Launch EEG Visualizer.bat"
+    set "EEGV_DIR=%SCRIPT_DIR%"
+    set "EEGV_ICON=%VENV_DIR%\Scripts\pythonw.exe"
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "$l = Join-Path ([Environment]::GetFolderPath('Desktop')) 'EEG Visualizer.lnk'; $s = (New-Object -ComObject WScript.Shell).CreateShortcut($l); $s.TargetPath = $env:EEGV_TARGET; $s.WorkingDirectory = $env:EEGV_DIR; $s.IconLocation = $env:EEGV_ICON + ',0'; $s.Description = 'EEG Visualizer for Muse'; $s.Save()" >nul 2>nul
+    if not errorlevel 1 echo Added an "EEG Visualizer" shortcut to your Desktop.
+
     rem Mark setup complete only after a successful install, so a half-finished
     rem setup is retried next time instead of launching a broken app.
     > "%READY_MARKER%" echo installed

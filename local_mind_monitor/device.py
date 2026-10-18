@@ -156,6 +156,7 @@ class MuseDevice:
         self._record_paused = False    # recording paused because the stream stalled
         self._stale_skipped = 0        # rows not written during the current stall
         self._recorded_data_time = 0.0  # _last_data_time as of the last row written
+        self.record_error: str | None = None  # last session-file write failure, for the UI
 
         # Stall detection / recovery state.
         self._last_data_time = 0.0     # monotonic time new EEG last arrived
@@ -297,7 +298,15 @@ class MuseDevice:
                 # with no clue why.
                 if not self._stall_logged:
                     log.exception("EEG pull failed")
-            self._maybe_record()
+            # A recording failure (disk full, file removed, unwritable folder)
+            # must not take the acquisition thread down with it -- that froze
+            # the plots and silently ended the session. Report it instead.
+            try:
+                self._maybe_record()
+            except Exception as exc:
+                if self.record_error is None:
+                    log.exception("Writing the session file failed")
+                self.record_error = str(exc) or exc.__class__.__name__
             self._maybe_recover()
             time.sleep(0.05)
 
@@ -533,6 +542,7 @@ class MuseDevice:
     def start_recording(self, path: str) -> None:
         self._recorder = Recorder(path, self.channel_names)
         self._last_record = 0.0
+        self.record_error = None
 
     def stop_recording(self) -> None:
         if self._recorder:
@@ -546,6 +556,10 @@ class MuseDevice:
     @property
     def is_recording(self) -> bool:
         return self._recorder is not None
+
+    @property
+    def recording_path(self) -> str | None:
+        return self._recorder.path if self._recorder else None
 
     def _maybe_record(self) -> None:
         if not self._recorder:
@@ -597,3 +611,4 @@ class MuseDevice:
             battery=self.battery_level(),
             heart_rate=self.heart_rate(),
         )
+        self.record_error = None  # writing works (again)
