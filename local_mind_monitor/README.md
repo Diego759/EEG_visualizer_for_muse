@@ -23,19 +23,37 @@ where the launchers below live.
   scrolling band-power (dB) graph with each band's Greek symbol riding the end
   of its line.
 - **Signal quality** — per-electrode good/ok/bad contact indicators.
+- **Heart rate and battery** — live BPM from the headband's optical sensor, and
+  battery percentage.
 - **CSV recording + markers** — ~1 Hz rows in a spreadsheet-friendly column
-  layout, with a marker button that annotates the session.
+  layout, saved to `Documents/EEG Visualizer/Sessions`. One-tap markers (the
+  **Marker** button or the **M** key) annotate the session.
 - **Robust connection** — detects a stalled Bluetooth stream, auto-reconnects,
   and tells you in the status bar instead of freezing silently. All activity is
   logged to `local_mind_monitor.log` next to the app.
+
+## Setting up on a new computer
+
+1. Install Python 3.11+ from [python.org](https://python.org/downloads/)
+   (Windows: tick **"Add python.exe to PATH"**).
+2. Download the repo (**Code → Download ZIP** on GitHub, or `git clone`) and
+   extract it somewhere permanent, e.g. `Documents` — not `Downloads`.
+3. Double-click the launcher for your system (below). The first run takes about
+   a minute and, on Windows, adds an **EEG Visualizer** icon to your Desktop.
+
+Your recordings live in `Documents/EEG Visualizer/Sessions`, separate from the
+app, so reinstalling or deleting the app folder never touches them. If Windows
+backs up your Documents folder to OneDrive, they're backed up too. Click
+**Sessions Folder** in the app to open it.
 
 ## Windows: just double-click
 
 Double-click **`Launch EEG Visualizer.bat`** inside `local_mind_monitor\`. The
 first double-click installs everything into a private `.venv` folder and takes
-about a minute — every double-click after that opens the app straight away.
-Requires Python 3.11+ from [python.org](https://python.org/downloads/) (check
-"Add python.exe to PATH" during install) if you don't already have it.
+about a minute, and puts an **EEG Visualizer** shortcut on your Desktop — every
+launch after that opens the app straight away. Requires Python 3.11+ from
+[python.org](https://python.org/downloads/) (check "Add python.exe to PATH"
+during install) if you don't already have it.
 
 ## macOS: just double-click
 
@@ -92,10 +110,15 @@ python -m local_mind_monitor.app --mac XX:XX:XX:XX:XX:XX   # target a specific d
 python -m local_mind_monitor.app --preset p1035            # BrainFlow Athena preset (default p1035)
 python -m local_mind_monitor.app --low-latency             # BrainFlow's L1 low-latency mode
 python -m local_mind_monitor.app --battery-scale 1.0       # show BrainFlow's raw battery number
+python -m local_mind_monitor.app --sessions-dir D:\EEG     # save recordings somewhere else
 ```
 
-Click **Connect**, then **Start Recording** to save a `session_*.csv` in the
-current directory. **Marker** annotates the next row. Sanity check on real
+Click **Connect** (the window stays usable while it searches for the headband),
+then **Start Recording** to save a `session_YYYYMMDD_HHMMSS.csv` in
+`Documents/EEG Visualizer/Sessions`. **Marker** — or the **M** key — stamps
+`Marker 1`, `Marker 2`, … into the `Elements` column at that moment, no typing
+needed. If the file can't be written (disk full, folder removed), a ⚠ warning
+appears in the status bar while the live view keeps running. Sanity check on real
 hardware: alpha power (8–13 Hz) rises when you close your eyes.
 
 ### About the battery percentage
@@ -133,5 +156,5 @@ are the next things to try.
 
 ## Not yet included (v2 ideas)
 
-OSC/LSL re-broadcast, PPG heart-rate and fNIRS views, local session history,
-and a packaged one-file executable.
+OSC/LSL re-broadcast, an fNIRS view, in-app session history, and a packaged
+one-file executable.

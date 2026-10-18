@@ -7,6 +7,10 @@ rem one keeps its console window open so you can read the results.
 
 set "SCRIPT_DIR=%~dp0"
 set "VENV_DIR=%SCRIPT_DIR%.venv"
+set "VENV_PY=%VENV_DIR%\Scripts\python.exe"
+rem Same setup-finished marker as the app launchers, so running this check
+rem first on a new computer leaves a complete setup the app can reuse.
+set "READY_MARKER=%VENV_DIR%\.deps-installed"
 set "PY_LAUNCHER=py -3"
 
 where py >nul 2>nul
@@ -32,13 +36,30 @@ if exist "%VENV_DIR%\Scripts" if not exist "%VENV_DIR%\pyvenv.cfg" (
     rmdir /s /q "%VENV_DIR%"
 )
 
-if not exist "%VENV_DIR%\pyvenv.cfg" (
+if not exist "%READY_MARKER%" (
     echo Setting up for the first time ^(installing dependencies^)...
     echo This only happens once and can take a minute.
     echo.
-    %PY_LAUNCHER% -m venv "%VENV_DIR%"
-    "%VENV_DIR%\Scripts\python.exe" -m pip install --quiet --upgrade pip
-    "%VENV_DIR%\Scripts\python.exe" -m pip install --quiet -r "%SCRIPT_DIR%requirements.txt"
+    if not exist "%VENV_DIR%\pyvenv.cfg" (
+        %PY_LAUNCHER% -m venv "%VENV_DIR%"
+        if errorlevel 1 (
+            echo.
+            echo Could not create the virtual environment. See the error above.
+            pause
+            exit /b 1
+        )
+    )
+    "%VENV_PY%" -m pip --version >nul 2>nul
+    if errorlevel 1 "%VENV_PY%" -m ensurepip --upgrade
+    "%VENV_PY%" -m pip install --quiet --upgrade pip
+    "%VENV_PY%" -m pip install --quiet -r "%SCRIPT_DIR%requirements.txt"
+    if errorlevel 1 (
+        echo.
+        echo Dependency install failed. See the error above.
+        pause
+        exit /b 1
+    )
+    > "%READY_MARKER%" echo installed
 )
 
 rem Ensure the Bluetooth library is present even if the venv predates it.

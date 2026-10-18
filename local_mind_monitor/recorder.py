@@ -24,7 +24,9 @@ class Recorder:
     def __init__(self, path: str, channel_names: list[str]):
         self.path = path
         self.channel_names = channel_names
-        self._file = open(path, "w", newline="")
+        # UTF-8 explicitly: Windows' default (cp1252) can't encode every marker
+        # label, and a failed write here would stop the recording.
+        self._file = open(path, "w", newline="", encoding="utf-8")
         self._writer = csv.writer(self._file)
         self._pending_marker: str = ""
         self._writer.writerow(self._header())
@@ -45,8 +47,9 @@ class Recorder:
         return cols
 
     def add_marker(self, label: str) -> None:
-        """Queue a marker; it lands in the ``Elements`` column of the next row."""
-        self._pending_marker = label
+        """Queue a marker; it lands in the ``Elements`` column of the next row.
+        Several markers within the same row are kept, separated by ``; ``."""
+        self._pending_marker = f"{self._pending_marker}; {label}" if self._pending_marker else label
 
     def write_row(
         self,
@@ -73,9 +76,10 @@ class Recorder:
         row += [round(battery, 1) if battery is not None else ""]
         row += [round(heart_rate, 1) if heart_rate is not None else ""]
         row += [self._pending_marker]
-        self._pending_marker = ""
         self._writer.writerow(row)
         self._file.flush()
+        # Only now -- a failed write keeps the marker for the next row.
+        self._pending_marker = ""
         self.rows_written += 1
 
     def close(self) -> None:

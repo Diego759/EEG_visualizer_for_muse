@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 from datetime import datetime
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from ..device import MuseDevice
 from .band_readout import BandReadout
@@ -16,6 +17,20 @@ from .plots import BandPowerPlot, RawEEGPlot
 log = logging.getLogger("local_mind_monitor.gui")
 
 HSI_COLORS = {"good": "#4caf6a", "ok": "#e0a53a", "bad": "#e05a5a"}
+
+
+def default_sessions_dir() -> str:
+    """Where recordings go: Documents/EEG Visualizer/Sessions.
+
+    Recordings used to land in whatever folder the launcher ran from (next to
+    the app), so deleting or re-extracting the app took them with it. Documents
+    is stable across reinstalls, easy to find, and on Windows is usually backed
+    up by OneDrive -- so a lost or stolen computer doesn't take the sessions too.
+    """
+    docs = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DocumentsLocation)
+    if not docs:
+        docs = os.path.join(os.path.expanduser("~"), "Documents")
+    return os.path.join(docs, "EEG Visualizer", "Sessions")
 
 STYLESHEET = """
 QMainWindow, QWidget { background: #131317; color: #e6e6ea;
@@ -45,6 +60,10 @@ QStatusBar::item { border: none; }
 
 
 class MainWindow(QtWidgets.QMainWindow):
+    # Emitted from the connect worker thread with (device, error-or-None);
+    # Qt delivers it on the GUI thread.
+    _connect_finished = QtCore.Signal(object, object)
+
     def __init__(
         self,
         synthetic: bool = False,
@@ -52,6 +71,7 @@ class MainWindow(QtWidgets.QMainWindow):
         low_latency: bool = False,
         preset: str = "p1035",
         battery_scale: float | None = None,
+        sessions_dir: str | None = None,
     ):
         super().__init__()
         self._synthetic = synthetic
@@ -59,7 +79,13 @@ class MainWindow(QtWidgets.QMainWindow):
         self._low_latency = low_latency
         self._preset = preset
         self._battery_scale = battery_scale
+        self._sessions_dir = sessions_dir or default_sessions_dir()
         self.device: MuseDevice | None = None
+        self._connecting = False
+        self._closing = False
+        self._marker_count = 0
+        self._record_error_shown = False
+        self._connect_finished.connect(self._on_connect_finished)
 
         self.setWindowTitle("EEG Visualizer for Muse" + (" (synthetic)" if synthetic else ""))
         self.resize(1040, 800)
@@ -113,16 +139,27 @@ class MainWindow(QtWidgets.QMainWindow):
         self.record_btn.clicked.connect(self._toggle_record)
         self.record_btn.setEnabled(False)
 
-        self.marker_btn = QtWidgets.QPushButton("Marker")
+        self.marker_btn = QtWidgets.QPushButton("Marker (M)")
         self.marker_btn.setObjectName("markerBtn")
+        self.marker_btn.setToolTip(
+            "Stamp a numbered marker into the recording right now. "
+            "Press M on the keyboard to do it without looking."
+        )
         self.marker_btn.clicked.connect(self._add_marker)
         self.marker_btn.setEnabled(False)
+        marker_key = QtGui.QShortcut(QtGui.QKeySequence("M"), self)
+        marker_key.activated.connect(self._add_marker)
+
+        self.sessions_btn = QtWidgets.QPushButton("Sessions Folder")
+        self.sessions_btn.setToolTip(f"Open the folder where recordings are saved:\n{self._sessions_dir}")
+        self.sessions_btn.clicked.connect(self._open_sessions_folder)
 
         bar.addWidget(self.connect_btn)
         bar.addWidget(self.disconnect_btn)
         bar.addSpacing(12)
         bar.addWidget(self.record_btn)
         bar.addWidget(self.marker_btn)
+        bar.addWidget(self.sessions_btn)
         bar.addStretch(1)
 
         # Live vitals, right-aligned.
@@ -174,28 +211,58 @@ class MainWindow(QtWidgets.QMainWindow):
 
     # ---------------------------------------------------------------- actions
     def _connect(self) -> None:
-        if self.device is not None:
+        if self.device is not None or self._connecting:
             return
         self.connect_btn.setEnabled(False)
-        self.status.showMessage("Connecting…")
-        QtWidgets.QApplication.processEvents()
         try:
-            self.device = MuseDevice(
+            dev = MuseDevice(
                 synthetic=self._synthetic,
                 mac_address=self._mac,
                 low_latency=self._low_latency,
                 preset=self._preset,
                 battery_scale=self._battery_scale,
             )
-            self.device.start()
         except Exception as exc:
-            log.exception("Connection failed")
-            self.device = None
-            self.connect_btn.setEnabled(True)
-            self.status.showMessage(f"Connection failed: {exc}")
-            QtWidgets.QMessageBox.critical(self, "Connection failed", str(exc))
+            self._connect_failed(exc)
+            return
+        # Finding the headband can take up to a minute (several Bluetooth scans).
+        # Doing it here on the GUI thread froze the window and Windows marked it
+        # "Not Responding", inviting a force-close -- so search in the background.
+        self._connecting = True
+        self.status.showMessage(
+            "Starting…" if self._synthetic
+            else "Searching for your Muse… make sure it's on. This can take up to a minute."
+        )
+        threading.Thread(target=self._connect_worker, args=(dev,), daemon=True).start()
+
+    def _connect_worker(self, dev: MuseDevice) -> None:
+        try:
+            dev.start()
+        except Exception as exc:
+            self._connect_finished.emit(dev, exc)
+            return
+        self._connect_finished.emit(dev, None)
+
+    def _connect_failed(self, exc: Exception) -> None:
+        log.error("Connection failed", exc_info=exc)
+        self.connect_btn.setEnabled(True)
+        self.status.showMessage(f"Connection failed: {exc}")
+        QtWidgets.QMessageBox.critical(self, "Connection failed", str(exc))
+
+    def _on_connect_finished(self, dev: MuseDevice, exc: Exception | None) -> None:
+        self._connecting = False
+        if self._closing:
+            dev.stop()
+            return
+        if exc is not None:
+            try:
+                dev.stop()  # release anything half-opened
+            except Exception:
+                pass
+            self._connect_failed(exc)
             return
 
+        self.device = dev
         names = self.device.channel_names
         self.raw_plot = RawEEGPlot(names)
         self.band_plot = BandPowerPlot(names)
@@ -243,25 +310,50 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         if not self.device.is_recording:
             fname = f"session_{datetime.now():%Y%m%d_%H%M%S}.csv"
-            path = os.path.join(os.getcwd(), fname)
-            self.device.start_recording(path)
+            path = os.path.join(self._sessions_dir, fname)
+            try:
+                os.makedirs(self._sessions_dir, exist_ok=True)
+                self.device.start_recording(path)
+            except OSError as exc:
+                log.error("Could not start recording to %s", path, exc_info=exc)
+                QtWidgets.QMessageBox.critical(
+                    self, "Can't start recording",
+                    f"Couldn't create the session file:\n{path}\n\n{exc}",
+                )
+                return
+            self._marker_count = 0
+            self._record_error_shown = False
             self.record_btn.setText("⏹ Stop Recording")
             self._set_recording_style(True)
             self.status.showMessage(f"Recording → {path}")
         else:
+            path = self.device.recording_path or ""
             self.device.stop_recording()
             self.record_btn.setText("Start Recording")
             self._set_recording_style(False)
-            self.status.showMessage("Recording stopped")
+            self.status.showMessage(f"Recording saved: {path}" if path else "Recording stopped")
 
     def _add_marker(self) -> None:
-        if self.device and self.device.is_recording:
-            label, ok = QtWidgets.QInputDialog.getText(self, "Marker", "Label:", text="marker")
-            if ok:
-                self.device.add_marker(label)
-                self.status.showMessage(f"Marker: {label}")
-        elif self.device:
+        """One tap, no dialog: the marker is stamped at the moment you click (or
+        press M), not after typing a label -- and nothing to read or type while
+        your eyes are closed."""
+        if not self.device:
+            return
+        if not self.device.is_recording:
             self.status.showMessage("Start recording first to drop a marker.")
+            return
+        self._marker_count += 1
+        label = f"Marker {self._marker_count}"
+        self.device.add_marker(label)
+        self.status.showMessage(f"✓ {label} at {datetime.now():%H:%M:%S}")
+
+    def _open_sessions_folder(self) -> None:
+        try:
+            os.makedirs(self._sessions_dir, exist_ok=True)
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(self, "Sessions folder", f"{self._sessions_dir}\n\n{exc}")
+            return
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(self._sessions_dir))
 
     # ---------------------------------------------------------------- refresh
     def _refresh(self) -> None:
@@ -320,15 +412,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 "check the headband; reconnecting…"
             )
             self._was_stalled = True
-        elif self._was_stalled:
+        elif dev.is_recording and dev.record_error:
+            msg = f"⚠ Recording problem — data is NOT being saved: {dev.record_error}"
+            if self.status.currentMessage() != msg:
+                self.status.showMessage(msg)
+            self._record_error_shown = True
+        elif self._was_stalled or self._record_error_shown:
             # Recovered -- restore the normal status line.
             if dev.is_recording:
                 self.status.showMessage("Recording…")
             else:
                 self.status.showMessage(f"Connected @ {dev.sampling_rate} Hz")
             self._was_stalled = False
+            self._record_error_shown = False
 
     def closeEvent(self, event) -> None:
+        self._closing = True
         if self.device:
             self.device.stop()
         super().closeEvent(event)

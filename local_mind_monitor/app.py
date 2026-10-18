@@ -70,6 +70,11 @@ def main() -> int:
         "BrainFlow scales its raw reading by 1/512 when the device uses 1/256, so a full "
         "charge reads 50%%). Use 1.0 to see BrainFlow's raw number.",
     )
+    parser.add_argument(
+        "--sessions-dir",
+        default=None,
+        help="Folder to save recordings in (default: Documents/EEG Visualizer/Sessions).",
+    )
     args = parser.parse_args()
 
     log_path = _setup_logging()
@@ -97,6 +102,7 @@ def main() -> int:
         low_latency=args.low_latency,
         preset=args.preset,
         battery_scale=args.battery_scale,
+        sessions_dir=args.sessions_dir,
     )
 
     def _surface() -> None:

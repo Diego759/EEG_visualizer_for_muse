@@ -6,6 +6,9 @@
 cd "$(dirname "$0")" || exit 1
 SCRIPT_DIR="$(pwd)"
 VENV_DIR="$SCRIPT_DIR/.venv"
+# Same setup-finished marker as the app launchers, so running this check
+# first on a new computer leaves a complete setup the app can reuse.
+READY_MARKER="$VENV_DIR/.deps-installed"
 
 PY=""
 for c in python3 python; do
@@ -21,15 +24,22 @@ if [ -d "$VENV_DIR/bin" ] && [ ! -f "$VENV_DIR/pyvenv.cfg" ]; then
     rm -rf "$VENV_DIR"
 fi
 
-if [ ! -f "$VENV_DIR/pyvenv.cfg" ]; then
+if [ ! -f "$READY_MARKER" ]; then
     echo "Setting up for the first time (installing dependencies)..."
     echo "This only happens once and can take a minute."
     echo
-    "$PY" -m venv "$VENV_DIR"
+    if [ ! -f "$VENV_DIR/pyvenv.cfg" ]; then
+        "$PY" -m venv "$VENV_DIR" || {
+            echo "Could not create the virtual environment. See the error above."
+            read -r -p "Press Return to close." _; exit 1; }
+    fi
     "$VENV_DIR/bin/python" -m pip --version >/dev/null 2>&1 || \
         "$VENV_DIR/bin/python" -m ensurepip --upgrade
     "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip
-    "$VENV_DIR/bin/python" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+    "$VENV_DIR/bin/python" -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt" || {
+        echo "Dependency install failed. See the error above."
+        read -r -p "Press Return to close." _; exit 1; }
+    echo "installed" > "$READY_MARKER"
 fi
 
 # Ensure the Bluetooth library is present even if the venv predates it.
