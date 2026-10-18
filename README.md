@@ -56,6 +56,6 @@ way to confirm the signal is real.
 
 ### Also in this repo
 
-This repository also retains a small legacy **Globomantics CRM** training
-project (`database.py`, `start.py`, `templates/`, `static/`, `data/`). Those
-files are unrelated to the EEG app and are kept for history.
+[`model-view-controller-pattern/`](model-view-controller-pattern/) holds a small,
+unrelated Flask training exercise (the old "Globomantics CRM" course project),
+kept for history.
